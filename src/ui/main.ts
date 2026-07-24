@@ -292,6 +292,9 @@ async function mount(): Promise<void> {
   unsubscribe?.();
   unsubscribe = null;
   runtime = null;
+  // Values still queued belong to the filter we're leaving; its input ids may
+  // not even exist on the next one.
+  queued.clear();
 
   const filter = filterById(activeFilterId);
   stage.classList.add('busy');
@@ -356,14 +359,82 @@ function sourceDimensions(
     : { width: Math.round((long * w) / h), height: long };
 }
 
+// ── keeping controls usable while they're being used ─────────────────────────
+
+/** True from pointerdown on a control until the pointer is released anywhere. */
+let dragging = false;
+/** A control rebuild that was deferred because the user was mid-drag. */
+let rebuildPending = false;
+
+panel.addEventListener('pointerdown', () => {
+  dragging = true;
+});
+// On window, not the panel: a slider drag routinely ends with the pointer well
+// outside the panel, and a pointerup we never saw would wedge `dragging` on.
+window.addEventListener('pointerup', () => {
+  if (!dragging) return;
+  dragging = false;
+  if (rebuildPending) paint(filterById(activeFilterId));
+});
+
 function paint(filter: FilterDef): void {
   // The hydrated template IS an SVG document (each filter's template.html is a
   // single `{{{...Svg}}}` interpolation), so it drops straight into the stage.
   stage.innerHTML = hydrated;
-  panel.replaceChildren(
-    renderControls(filter, model, (id, value) => void runtime?.setInput(id, value), openGroups),
-  );
+
+  // Mid-drag, replacing the controls would destroy the very element the pointer
+  // is captured on — the drag dies on the first frame and the slider becomes
+  // almost impossible to move. Defer the rebuild to pointerup; the preview keeps
+  // updating live throughout, which is the part the user is actually watching.
+  if (dragging) {
+    rebuildPending = true;
+  } else {
+    rebuildPending = false;
+    // A hook can rewrite any input (posterize re-seeds its whole palette when
+    // the step count changes), so the rebuild is wholesale — but the control the
+    // user was on has to survive it, or keyboard adjustment loses focus after
+    // every single arrow press.
+    const focused = (document.activeElement as HTMLElement | null)?.dataset?.inputId;
+    panel.replaceChildren(
+      renderControls(filter, model, setInput, openGroups),
+    );
+    if (focused) {
+      panel.querySelector<HTMLElement>(`[data-input-id="${CSS.escape(focused)}"]`)?.focus();
+    }
+  }
+
   placeBtn.disabled = !hydrated.trim() || !source;
+}
+
+/**
+ * Feed a control's value to the runtime, at most one in flight at a time.
+ *
+ * A drag fires `input` far faster than a filter can re-trace (halftone emits
+ * ~1 700 circles a pass), so letting every event start its own hook run would
+ * pile up work the user has already scrolled past. Instead the newest value per
+ * input wins and the rest are dropped — the render the user ends on is always
+ * the one they released on.
+ */
+let inflight: Promise<void> | null = null;
+const queued = new Map<string, InputValue>();
+
+function setInput(id: string, value: InputValue): void {
+  queued.set(id, value);
+  if (inflight) return;
+  const drain = async (): Promise<void> => {
+    try {
+      while (queued.size) {
+        const [nextId, nextValue] = queued.entries().next().value as [string, InputValue];
+        queued.delete(nextId);
+        await runtime?.setInput(nextId, nextValue);
+      }
+    } finally {
+      // Cleared in `finally`, not after the loop: one hook that throws must not
+      // leave the queue permanently blocked, silently freezing every control.
+      inflight = null;
+    }
+  };
+  inflight = drain();
 }
 
 // ── committing to the canvas ──────────────────────────────────────────────────

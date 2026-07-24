@@ -53,23 +53,10 @@ function treatment({ brightness = true } = {}): FilterGroup {
   };
 }
 
+/** Tab order, and — via the first entry — the filter the panel opens on.
+ *  Halftone leads: it's the fastest to trace, the most forgiving of a low-
+ *  contrast source, and the one whose output reads instantly as "this worked". */
 export const FILTERS: FilterDef[] = [
-  {
-    id: 'filter-posterize',
-    label: 'Posterize',
-    source: 'photo',
-    groups: [
-      {
-        label: 'Separations',
-        inputs: ['steps', 'threshold', 'thresholdLevel', 'invert', 'resample', 'colors'],
-      },
-      {
-        label: 'Trace',
-        inputs: ['quality', 'smoothing', 'transparentBg'],
-      },
-      treatment(),
-    ],
-  },
   {
     id: 'filter-halftone',
     label: 'Halftone',
@@ -87,6 +74,22 @@ export const FILTERS: FilterDef[] = [
         label: 'Tone',
         collapsed: true,
         inputs: ['gamma', 'smoothing', 'dither'],
+      },
+      treatment(),
+    ],
+  },
+  {
+    id: 'filter-posterize',
+    label: 'Posterize',
+    source: 'photo',
+    groups: [
+      {
+        label: 'Separations',
+        inputs: ['steps', 'threshold', 'thresholdLevel', 'invert', 'resample', 'colors'],
+      },
+      {
+        label: 'Trace',
+        inputs: ['quality', 'smoothing', 'transparentBg'],
       },
       treatment(),
     ],

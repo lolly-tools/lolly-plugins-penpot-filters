@@ -221,16 +221,69 @@ body {
   accent-color: var(--accent);
 }
 
+/*
+ * Sliders get their own row proportions. In the default 1fr/130px grid the
+ * track came out under 100px wide — about 4px per step on a 0–100 range, which
+ * is not a control anyone can aim. The label column is fixed and narrow instead
+ * so the track takes everything that's left.
+ */
+.row:has(.slider) {
+  grid-template-columns: 92px 1fr;
+}
+
 .slider {
   display: grid;
-  grid-template-columns: 1fr 34px;
-  gap: 6px;
+  grid-template-columns: 1fr 30px;
+  gap: 8px;
   align-items: center;
 }
 
 .slider input[type='range'] {
   width: 100%;
-  accent-color: var(--accent);
+  margin: 0;
+  /* A 20px-tall input around a 4px track: the extra height is all hit area, so
+     a grab that lands slightly above or below the line still takes. */
+  height: 20px;
+  background: transparent;
+  appearance: none;
+  cursor: pointer;
+}
+
+.slider input[type='range']::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--line);
+}
+
+.slider input[type='range']::-moz-range-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--line);
+}
+
+/* 16px rather than the ~12px platform default — a bigger target to grab, and
+   big enough to stay visible against the preview behind it. */
+.slider input[type='range']::-webkit-slider-thumb {
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  margin-top: -6px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.slider input[type='range']::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.slider input[type='range']:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .slider output {
