@@ -33,14 +33,22 @@ jobs:
           path: lolly-plugins-penpot-filters
 
       # Sibling lolly checkout — SOURCE FILES ONLY. The bundle needs the engine
-      # .ts sources plus community/filter-*/; the engine's two runtime deps
-      # (handlebars, ajv) are dependencies of THIS repo and vite-aliased to its
-      # node_modules, so lolly is never npm-installed here. No submodules
-      # either: this plugin touches nothing under shells/.
+      # .ts sources plus the four community/filter-* tool directories; the
+      # engine's two runtime deps (handlebars, ajv) are dependencies of THIS
+      # repo and aliased to its node_modules, so lolly is never npm-installed
+      # here.
       - uses: actions/checkout@v4
         with:
           repository: lolly-tools/lolly
           path: lolly
+
+      # community/ is a submodule (lolly-tools/lolly-tools) — the filters live
+      # there, so without this the build finds an empty directory. Only this one
+      # is initialised: a recursive init would drag in every shell and service
+      # subrepo and break on any parent-pointer drift.
+      - name: Init community submodule
+        working-directory: lolly
+        run: git submodule update --init community
 
       - uses: actions/setup-node@v4
         with:
