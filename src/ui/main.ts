@@ -1,0 +1,460 @@
+// SPDX-License-Identifier: MPL-2.0
+/**
+ * Panel side of the plugin — everything with a DOM.
+ *
+ * The shape of it: pick a source image (the board selection, an upload, or the
+ * camera), mount one of the four Lolly filter tools against it through the
+ * engine's own loader + runtime, show the hydrated SVG live, and on "Add to
+ * canvas" post that SVG to the sandbox to become a real Penpot shape.
+ *
+ * The engine does all the interesting work. This file is wiring: source →
+ * runtime input, runtime state → preview, button → postMessage.
+ */
+import { loadTool } from '@engine/loader.ts';
+import { createRuntime } from '@engine/runtime.ts';
+import type { Runtime } from '@engine/runtime.ts';
+import type { InputModelItem, InputValue } from '@engine/inputs.ts';
+import type { AssetRef } from '@lolly-tools/core/host-v1';
+
+import type { PluginToUi, UiToPlugin, ShapeInfo, Theme } from '../messages.ts';
+import { createHost, PENPOT_COLORS, type FilterHost } from './host.ts';
+import { describeFailure } from './media.ts';
+import { FILTERS, filterById, type FilterDef } from './filters.ts';
+import { renderControls } from './controls.ts';
+
+// ── plugin channel ────────────────────────────────────────────────────────────
+
+let nextRequestId = 1;
+const pending = new Map<number, { resolve: (m: PluginToUi) => void; reject: (e: Error) => void }>();
+
+function post(msg: UiToPlugin): void {
+  parent.postMessage(msg, '*');
+}
+
+/** Send a request and wait for the sandbox's matching reply. */
+function request(build: (requestId: number) => UiToPlugin): Promise<PluginToUi> {
+  const requestId = nextRequestId++;
+  return new Promise((resolve, reject) => {
+    pending.set(requestId, { resolve, reject });
+    post(build(requestId));
+  });
+}
+
+// ── panel state ───────────────────────────────────────────────────────────────
+
+type SourceKind = 'board' | 'upload' | 'camera';
+
+interface Source {
+  kind: SourceKind;
+  ref: AssetRef;
+  /** Board shape the pixels came from — where the result gets placed. */
+  shapeId: string | null;
+  label: string;
+}
+
+let theme: Theme = 'light';
+let selection: ShapeInfo[] = [];
+let source: Source | null = null;
+let activeFilterId = FILTERS[0].id;
+let runtime: Runtime | null = null;
+let unsubscribe: (() => void) | null = null;
+let live = false;
+let model: InputModelItem[] = [];
+let hydrated = '';
+/** Generation counter so a slow mount that the user has already moved on from
+ *  can't install itself over the newer one. */
+let mountSeq = 0;
+
+const openGroups = new Set<string>();
+const seededFilters = new Set<string>();
+const host: FilterHost = createHost(PENPOT_COLORS.light);
+
+// ── DOM ───────────────────────────────────────────────────────────────────────
+
+const app = document.getElementById('app') as HTMLDivElement;
+app.innerHTML = `
+  <header class="tabs" role="tablist"></header>
+  <section class="source">
+    <div class="source-buttons">
+      <button type="button" data-source="board">Use selection</button>
+      <button type="button" data-source="upload">Upload…</button>
+      <button type="button" data-source="camera">Use camera</button>
+    </div>
+    <p class="source-note muted"></p>
+  </section>
+  <section class="preview">
+    <div class="stage" aria-live="polite"></div>
+  </section>
+  <p class="error" hidden></p>
+  <section class="panel"></section>
+  <footer class="actions">
+    <button type="button" class="primary" data-act="place" disabled>Add to canvas</button>
+  </footer>
+  <input type="file" accept="image/*" hidden />
+`;
+
+const tabsEl = app.querySelector('.tabs') as HTMLElement;
+const sourceNote = app.querySelector('.source-note') as HTMLElement;
+const stage = app.querySelector('.stage') as HTMLElement;
+const panel = app.querySelector('.panel') as HTMLElement;
+const errorEl = app.querySelector('.error') as HTMLParagraphElement;
+const placeBtn = app.querySelector('[data-act="place"]') as HTMLButtonElement;
+const fileInput = app.querySelector('input[type=file]') as HTMLInputElement;
+
+function showError(message: string | null): void {
+  errorEl.hidden = !message;
+  errorEl.textContent = message ?? '';
+}
+
+function setNote(text: string): void {
+  sourceNote.textContent = text;
+}
+
+// ── source acquisition ────────────────────────────────────────────────────────
+
+let assetSeq = 0;
+
+/** Wrap a data URL as an AssetRef the tools can consume, and register it with
+ *  the host so the runtime's re-resolve pass can find it again. */
+function toAsset(url: string, name: string, width: number, height: number): AssetRef {
+  return host.putAsset({
+    source: 'user',
+    id: `panel-${assetSeq++}`,
+    type: 'raster',
+    format: 'png',
+    url,
+    width,
+    height,
+    meta: { name },
+  });
+}
+
+function bytesToDataUrl(bytes: Uint8Array, mime = 'image/png'): string {
+  let binary = '';
+  // Chunked: a single String.fromCharCode(...bytes) blows the argument limit on
+  // anything above a few hundred KB, and a board export is routinely megabytes.
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  }
+  return `data:${mime};base64,${btoa(binary)}`;
+}
+
+async function useBoardSelection(): Promise<void> {
+  const shape = selection[0];
+  if (!shape) {
+    showError('Select a shape, board or image on the canvas first.');
+    return;
+  }
+  showError(null);
+  setNote(`Grabbing “${shape.name}”…`);
+  // Oversample small shapes: the trace samples a grid off the decoded bitmap, so
+  // a 1× export of a 200 px icon would starve it. Capped at 4× so a full board
+  // doesn't turn into a 60-megapixel decode.
+  const scale = Math.min(4, Math.max(1, Math.round(1200 / Math.max(shape.width, shape.height))));
+  const reply = await request((requestId) => ({ type: 'grab-image', requestId, shapeId: shape.id, scale }));
+  if (reply.type !== 'image-data') return;
+
+  await stopLive();
+  source = {
+    kind: 'board',
+    ref: toAsset(bytesToDataUrl(reply.bytes), reply.name, reply.width, reply.height),
+    shapeId: shape.id,
+    label: reply.name,
+  };
+  setNote(`Filtering “${reply.name}”.`);
+  await mount();
+}
+
+function useUpload(): void {
+  fileInput.value = '';
+  fileInput.click();
+}
+
+fileInput.addEventListener('change', async () => {
+  const file = fileInput.files?.[0];
+  if (!file) return;
+  showError(null);
+  const url = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error ?? new Error('Could not read that file.'));
+    reader.readAsDataURL(file);
+  });
+  const size = await new Promise<{ w: number; h: number }>((resolve) => {
+    const img = new Image();
+    img.onload = () => resolve({ w: img.naturalWidth, h: img.naturalHeight });
+    img.onerror = () => resolve({ w: 1080, h: 1080 });
+    img.src = url;
+  });
+  await stopLive();
+  source = { kind: 'upload', ref: toAsset(url, file.name, size.w, size.h), shapeId: null, label: file.name };
+  setNote(`Filtering “${file.name}”.`);
+  await mount();
+});
+
+async function useCamera(): Promise<void> {
+  if (live) {
+    await stopLive();
+    return;
+  }
+  if (!host.media.isAvailable()) {
+    showError('This browser has no camera API available to the plugin panel.');
+    return;
+  }
+  showError(null);
+  setNote('Starting the camera…');
+  try {
+    await host.media.start();
+  } catch (e) {
+    setNote('');
+    showError(describeFailure(e));
+    return;
+  }
+  // The camera drives the tool's own onFrame hook: the runtime re-traces once
+  // per frame, so the preview IS the filter, not a video with a filter on top.
+  // The source is set even though its ref carries no url — onFrame supplies the
+  // pixels — because it's what names the result and arms "Add to canvas".
+  source = { kind: 'camera', ref: toAsset('', 'Camera', 1080, 1080), shapeId: null, label: 'Camera' };
+  if (!runtime) await mount();
+  else placeBtn.disabled = !hydrated.trim();
+  const started = await runtime?.startLive();
+  if (!started) {
+    host.media.stop();
+    setNote('');
+    showError('This filter can’t run live.');
+    return;
+  }
+  live = true;
+  setNote('Live — press “Add to canvas” to freeze the current frame.');
+  syncSourceButtons();
+}
+
+async function stopLive(): Promise<void> {
+  if (!live) return;
+  runtime?.stopLive();
+  host.media.stop();
+  live = false;
+  syncSourceButtons();
+}
+
+function syncSourceButtons(): void {
+  for (const btn of app.querySelectorAll<HTMLButtonElement>('[data-source]')) {
+    const kind = btn.dataset.source as SourceKind;
+    btn.classList.toggle('active', kind === 'camera' ? live : !live && source?.kind === kind);
+    if (kind === 'camera') btn.textContent = live ? 'Stop camera' : 'Use camera';
+    if (kind === 'board') btn.disabled = selection.length === 0;
+  }
+}
+
+app.querySelector('.source-buttons')?.addEventListener('click', (e) => {
+  const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-source]');
+  if (!btn) return;
+  const kind = btn.dataset.source as SourceKind;
+  if (kind === 'board') void useBoardSelection();
+  else if (kind === 'upload') useUpload();
+  else void useCamera();
+});
+
+// ── mounting a filter ─────────────────────────────────────────────────────────
+
+function renderTabs(): void {
+  tabsEl.replaceChildren(
+    ...FILTERS.map((f) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.role = 'tab';
+      btn.textContent = f.label;
+      btn.className = f.id === activeFilterId ? 'active' : '';
+      btn.addEventListener('click', () => {
+        if (f.id === activeFilterId) return;
+        activeFilterId = f.id;
+        renderTabs();
+        void mount();
+      });
+      return btn;
+    }),
+  );
+}
+
+/** Fetch one tool file as text. The tools sit in dist/tools/ next to the panel
+ *  (copied verbatim from the lolly tree at build time — see vite.config.ts). */
+async function fetchToolFile(path: string): Promise<string> {
+  const res = await fetch(new URL(`tools/${path}`, document.baseURI));
+  if (!res.ok) throw new Error(`${path}: ${res.status}`);
+  return res.text();
+}
+
+async function mount(): Promise<void> {
+  const seq = ++mountSeq;
+  const wasLive = live;
+  await stopLive();
+  unsubscribe?.();
+  unsubscribe = null;
+  runtime = null;
+
+  const filter = filterById(activeFilterId);
+  stage.classList.add('busy');
+
+  try {
+    const tool = await loadTool(filter.id, fetchToolFile);
+    if (seq !== mountSeq) return;
+
+    // The source image goes in as initial state, so the very first hydration
+    // already carries the traced art — no empty-placeholder flash.
+    const initial: Record<string, InputValue> = { ...filter.defaults };
+    if (source && source.ref.url) initial[filter.source] = source.ref;
+    // Output size follows the source, so a 16:9 board doesn't come back square.
+    const dims = sourceDimensions(tool.manifest.render);
+    if (dims) Object.assign(initial, dims);
+
+    const rt = await createRuntime(tool, host, initial);
+    if (seq !== mountSeq) return;
+    runtime = rt;
+
+    // Seed this filter's own default-open groups the first time it's mounted —
+    // openGroups is shared across filters (they share group labels), so seeding
+    // only once for the whole panel would leave every later filter shut.
+    // Once seeded, the user's own toggles are what's left.
+    if (!seededFilters.has(filter.id)) {
+      seededFilters.add(filter.id);
+      for (const g of filter.groups) if (!g.collapsed) openGroups.add(g.label);
+    }
+
+    unsubscribe = rt.subscribe((state) => {
+      model = state.model;
+      hydrated = state.hydrated;
+      paint(filter);
+    });
+    model = rt.getModel();
+    hydrated = rt.getHydrated();
+    paint(filter);
+    showError(null);
+
+    // Switching filters mid-camera keeps the camera running.
+    if (wasLive) await useCamera();
+  } catch (e) {
+    if (seq !== mountSeq) return;
+    showError(`Couldn’t load ${filter.label}: ${String((e as Error)?.message ?? e)}`);
+  } finally {
+    if (seq === mountSeq) stage.classList.remove('busy');
+  }
+}
+
+/** Match the render's aspect to the source image, keeping the manifest's own
+ *  size as the long edge. Only applies to the two filters that expose
+ *  width/height inputs (posterize, voronoi); the others letterbox via `fit`. */
+function sourceDimensions(
+  render: { width?: number; height?: number } | undefined,
+): { width: number; height: number } | null {
+  const w = source?.ref.width;
+  const h = source?.ref.height;
+  if (!w || !h || !render?.width) return null;
+  const long = Math.max(render.width, render.height ?? render.width);
+  return w >= h
+    ? { width: long, height: Math.round((long * h) / w) }
+    : { width: Math.round((long * w) / h), height: long };
+}
+
+function paint(filter: FilterDef): void {
+  // The hydrated template IS an SVG document (each filter's template.html is a
+  // single `{{{...Svg}}}` interpolation), so it drops straight into the stage.
+  stage.innerHTML = hydrated;
+  panel.replaceChildren(
+    renderControls(filter, model, (id, value) => void runtime?.setInput(id, value), openGroups),
+  );
+  placeBtn.disabled = !hydrated.trim() || !source;
+}
+
+// ── committing to the canvas ──────────────────────────────────────────────────
+
+function currentSvg(): string | null {
+  const svg = stage.querySelector('svg');
+  if (!svg) return null;
+  const clone = svg.cloneNode(true) as SVGElement;
+  // Penpot parses the markup standalone, so the namespace has to be explicit
+  // even though the browser left it implicit on a document-parsed element.
+  if (!clone.getAttribute('xmlns')) clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+  if (!clone.getAttribute('xmlns:xlink')) {
+    clone.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink');
+  }
+  return new XMLSerializer().serializeToString(clone);
+}
+
+placeBtn.addEventListener('click', async () => {
+  const svg = currentSvg();
+  if (!svg) return;
+  const filter = filterById(activeFilterId);
+  placeBtn.disabled = true;
+  placeBtn.textContent = 'Adding…';
+  try {
+    // Freeze the frame the user is looking at: stopping live first means the
+    // shape that lands matches the preview, not whatever the camera moved on to
+    // while Penpot was parsing.
+    await stopLive();
+    const reply = await request((requestId) => ({
+      type: 'place-svg',
+      requestId,
+      svg,
+      name: `${filter.label} — ${source?.label ?? 'render'}`,
+      sourceShapeId: source?.shapeId ?? null,
+    }));
+    if (reply.type === 'placed') setNote(`Added “${reply.name}” to the canvas.`);
+  } finally {
+    placeBtn.textContent = 'Add to canvas';
+    placeBtn.disabled = false;
+  }
+});
+
+// ── plugin messages ───────────────────────────────────────────────────────────
+
+function applyTheme(next: Theme): void {
+  theme = next;
+  document.documentElement.dataset.theme = theme;
+  host.setColors(PENPOT_COLORS[theme]);
+}
+
+window.addEventListener('message', (event: MessageEvent<PluginToUi>) => {
+  const msg = event.data;
+  if (!msg || typeof msg !== 'object') return;
+
+  if (msg.type === 'init') {
+    applyTheme(msg.theme);
+    selection = msg.selection;
+    syncSourceButtons();
+    // Nothing selected is the common cold-open case; say what to do rather than
+    // showing an empty stage with no explanation.
+    setNote(
+      selection.length
+        ? `“${selection[0].name}” is selected — press “Use selection”.`
+        : 'Select something on the canvas, upload an image, or use your camera.',
+    );
+    return;
+  }
+  if (msg.type === 'theme') {
+    applyTheme(msg.theme);
+    return;
+  }
+  if (msg.type === 'selection') {
+    selection = msg.selection;
+    syncSourceButtons();
+    return;
+  }
+  if (msg.type === 'error') {
+    showError(msg.message);
+  }
+
+  const waiter = 'requestId' in msg ? pending.get(msg.requestId) : undefined;
+  if (waiter && 'requestId' in msg) {
+    pending.delete(msg.requestId);
+    waiter.resolve(msg);
+  }
+});
+
+// ── boot ──────────────────────────────────────────────────────────────────────
+
+applyTheme((new URLSearchParams(location.search).get('theme') as Theme) ?? 'light');
+renderTabs();
+syncSourceButtons();
+void mount();
+post({ type: 'ready' });

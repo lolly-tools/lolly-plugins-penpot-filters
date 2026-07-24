@@ -1,0 +1,13 @@
+{
+  "version": 2,
+  "name": "Lolly Filters",
+  "description": "Turn any image on your board into clean vector art: posterized colour separations, halftone dots, scanlines or Voronoi cells. Preview live — from the selection, an upload, or your camera — then drop the SVG straight onto the canvas. Runs entirely in your browser, nothing is uploaded anywhere.",
+  "code": "plugin.js",
+  "icon": "icon.png",
+  "permissions": [
+    "content:read",
+    "content:write",
+    "library:read",
+    "library:write"
+  ]
+}
