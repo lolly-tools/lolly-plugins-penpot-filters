@@ -17,6 +17,11 @@ npx esbuild "$HERE/smoke-entry.ts" \
   --alias:@lolly-tools/core/host-v1="$LOLLY/packages/core/src/host-v1.ts" \
   --alias:@lolly-tools/core="$LOLLY/packages/core/src/index.ts" \
   --loader:.json=json \
-  --log-level=warning
+  --log-level=warning \
+  `# The engine's sources sit in the lolly tree, so its bare handlebars/ajv` \
+  `# imports would resolve against lolly's node_modules — which CI never` \
+  `# installs. Point them at ours, mirroring vite.config.ts + tsconfig.json.` \
+  --alias:handlebars="$ROOT/node_modules/handlebars/dist/cjs/handlebars.js" \
+  --alias:ajv/dist/2020.js="$ROOT/node_modules/ajv/dist/2020.js"
 
 TOOLS_DIR="$ROOT/dist/tools" node "$OUT"
