@@ -264,8 +264,15 @@ body {
   .panel { grid-area: panel; min-height: 0; }
   .actions { grid-area: actions; }
 
-  .preview-max {
+  /* #app.preview-max, not .preview-max: the two-column layout above lives on
+     `#app` (id specificity), so the single-column override has to match the id
+     too or it loses and Expand stays trapped in the left column. */
+  #app.preview-max {
     grid-template-columns: 1fr;
+    /* Explicit rows: without them the 5-row track list from #app carries over and
+       the preview area lands on an `auto` row instead of filling. tabs / preview
+       (fills) / actions. */
+    grid-template-rows: auto 1fr auto;
     grid-template-areas:
       'tabs'
       'preview'
