@@ -87,7 +87,6 @@ app.innerHTML = `
     <div class="source-buttons">
       <button type="button" data-source="board">Use selection</button>
       <button type="button" data-source="upload">Upload…</button>
-      <button type="button" data-source="camera">Use camera</button>
     </div>
     <p class="source-note muted"></p>
   </section>
@@ -206,6 +205,10 @@ fileInput.addEventListener('change', async () => {
   await mount();
 });
 
+// Camera capture is unwired: Penpot's plugin sandbox blocks getUserMedia, so
+// there's no "Use camera" button. The live-source machinery below (and media.ts)
+// is kept dormant — the tool still declares its onFrame hook — so it's a button
+// away if the sandbox ever permits it.
 async function useCamera(): Promise<void> {
   if (live) {
     // "Stop camera" keeps the frame you're looking at: freeze it to a still so
@@ -280,8 +283,7 @@ async function freezeLiveFrame(): Promise<void> {
 function syncSourceButtons(): void {
   for (const btn of app.querySelectorAll<HTMLButtonElement>('[data-source]')) {
     const kind = btn.dataset.source as SourceKind;
-    btn.classList.toggle('active', kind === 'camera' ? live : !live && source?.kind === kind);
-    if (kind === 'camera') btn.textContent = live ? 'Stop camera' : 'Use camera';
+    btn.classList.toggle('active', source?.kind === kind);
     if (kind === 'board') btn.disabled = selection.length === 0;
   }
   syncCompare();
@@ -335,7 +337,6 @@ app.querySelector('.source-buttons')?.addEventListener('click', (e) => {
   const kind = btn.dataset.source as SourceKind;
   if (kind === 'board') void useBoardSelection();
   else if (kind === 'upload') useUpload();
-  else void useCamera();
 });
 
 // ── mounting a filter ─────────────────────────────────────────────────────────
@@ -350,6 +351,9 @@ function renderTabs(): void {
       btn.setAttribute('aria-selected', String(active));
       btn.textContent = f.label;
       btn.className = active ? 'active' : '';
+      // Raster effects still place fine — Penpot takes bitmap and vector — they
+      // just land as an image rather than an editable group.
+      if (f.raster) btn.title = 'Places as an image, not an editable vector group';
       btn.addEventListener('click', () => void selectEffect(f.effect));
       return btn;
     }),

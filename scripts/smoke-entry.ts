@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 /**
  * Headless smoke test for the tool-mounting path: load the one `filter` tool
- * through the engine's own loader, then for each vector effect the panel exposes,
+ * through the engine's own loader, then for each effect the panel exposes,
  * mount a runtime against the panel's host bridge and assert the template
  * hydrates to an SVG.
  *
@@ -63,4 +63,4 @@ if (failures) {
   console.error(`\n${failures} effect(s) failed to mount.`);
   process.exit(1);
 }
-console.log(`\nAll ${FILTERS.length} vector effects mount cleanly (${declared.size} inputs on ${TOOL_ID}).`);
+console.log(`\nAll ${FILTERS.length} effects mount cleanly (${declared.size} inputs on ${TOOL_ID}).`);

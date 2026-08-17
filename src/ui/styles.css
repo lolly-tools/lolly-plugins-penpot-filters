@@ -52,23 +52,31 @@ body {
 
 /* ── filter tabs ──────────────────────────────────────────────────────────── */
 
+/* Ten effects, so the strip wraps: equal-width columns that reflow to as many
+   rows as the panel width needs, tabs staying a consistent size rather than
+   being crushed onto one line. */
 .tabs {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
   gap: 2px;
   padding: 8px 8px 0;
   border-bottom: 1px solid var(--line);
 }
 
 .tabs button {
-  flex: 1;
   padding: 7px 4px;
   border: 0;
   border-radius: 6px 6px 0 0;
   background: transparent;
   color: var(--muted);
   font: inherit;
+  font-size: 12px;
   font-weight: 500;
   cursor: pointer;
+  /* A long label ("Imperfections") ellipsises rather than widening its column. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .tabs button:hover {
@@ -224,6 +232,45 @@ body {
   flex: 1;
   aspect-ratio: auto;
   min-height: 0;
+}
+
+/* ── wide panel: preview as a side column ────────────────────────────────────
+   Stacked (preview above, controls scrolling below) is the base and stays put on
+   a narrow panel. Once the panel is dragged (or opens) wide enough for two
+   columns, #app becomes a grid: the preview moves into a left column beside the
+   scrollable settings, so the square stage stops swallowing the whole height and
+   you see the trace and its controls at once. Tabs and the footer span both.
+   "Expand" still collapses it all to a single preview-only column. */
+@media (min-width: 640px) {
+  #app {
+    display: grid;
+    grid-template-columns: minmax(260px, 0.85fr) minmax(280px, 1fr);
+    grid-template-rows: auto auto auto 1fr auto;
+    grid-template-areas:
+      'tabs    tabs'
+      'source  source'
+      'error   error'
+      'preview panel'
+      'actions actions';
+    column-gap: 4px;
+  }
+
+  .tabs { grid-area: tabs; }
+  .source { grid-area: source; }
+  .error { grid-area: error; }
+  .preview { grid-area: preview; align-self: start; }
+  /* min-height:0 lets the settings column scroll inside its row instead of
+     stretching the whole grid past the viewport. */
+  .panel { grid-area: panel; min-height: 0; }
+  .actions { grid-area: actions; }
+
+  .preview-max {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      'tabs'
+      'preview'
+      'actions';
+  }
 }
 
 .error {

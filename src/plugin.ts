@@ -8,11 +8,12 @@
 import type { PluginToUi, UiToPlugin, ShapeInfo } from './messages.ts';
 
 // This panel is preview-led — you're judging a traced image before it lands on
-// the board — so it opens wider and taller than a typical form plugin to give
-// that preview room. The panel's "Expand" pill then trades the controls away for
-// a full-column stage when you want to inspect the result at size.
+// the board — so it opens wide enough for the two-column layout (preview beside
+// the scrollable settings; see styles.css) and tall to give both room. Drag it
+// narrower and the layout stacks; the "Expand" pill blows the preview up to fill
+// the panel either way.
 penpot.ui.open('Lolly Filters', `?theme=${penpot.theme}`, {
-  width: 480,
+  width: 720,
   height: 780,
 });
 

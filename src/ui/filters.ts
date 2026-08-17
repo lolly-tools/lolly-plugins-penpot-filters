@@ -3,20 +3,23 @@
  * Which of the Lolly filter tool's effects the panel exposes, and which of each
  * effect's inputs it shows.
  *
- * Upstream consolidated the seven `filter-*` tools into one `filter` tool: a
- * single `effect` select switches between halftone / scanline / posterize /
- * voronoi (which emit vector SVG) and duotone / pixel-stretch / imperfections
- * (which emit a raster image). This plugin's whole promise is an editable vector
- * group on the Penpot canvas, so it drives only the four vector effects and
- * leaves the raster three alone.
+ * Upstream consolidated the old `filter-*` tools into one `filter` tool: a single
+ * `effect` select switches between ten looks. Six emit vector SVG that lands as
+ * an editable Penpot group — halftone, posterize, scanline, voronoi, dither,
+ * ASCII — and four bake a raster image — duotone, pixel-stretch, imperfections,
+ * glitch — that Penpot's `createShapeFromSvgWithImages` places as a bitmap shape.
+ * The panel drives all ten; the tab's `raster` flag is the only thing that
+ * differs (a note, not a code path — the framework takes both).
  *
  * The tool is loaded verbatim — an effect must behave identically here and on
  * lolly.tools, so nothing is patched. Its inputs are namespaced per effect
- * (`ht_`, `sc_`, `pz_`, `vo_`), with a shared colour-treatment block and a block
- * of brand-overlay inputs (logo watermark, lower-third name card, headshot) that
- * exist for social-video exports and make no sense on a Penpot board. Rather
- * than edit the manifest, the panel renders only the ids listed here; the rest
- * keep their manifest defaults, which are all "off".
+ * (`ht_`, `sc_`, `pz_`, `vo_`, `di_`, `as_`, `du_`, `px_`, `im_`, `gl_`), over a
+ * shared colour-treatment block and a block of brand-overlay inputs (logo
+ * watermark, lower-third name card, headshot) that exist for social-video
+ * exports and make no sense on a Penpot board. Rather than edit the manifest, the
+ * panel renders only the ids listed here; the rest keep their manifest defaults,
+ * which are all "off". `vector`-typed inputs (image framing, per-channel offsets)
+ * have no control in this panel's small renderer, so they're left off too.
  */
 
 /** The one tool this plugin mounts. Its `effect` input picks the look. */
@@ -40,6 +43,10 @@ export interface FilterDef {
   effect: string;
   /** Short label for the tab strip — the manifest option label is the same. */
   label: string;
+  /** True for the effects that bake a bitmap rather than emit vector paths; they
+   *  still place fine (Penpot takes both), but land as an image, not an editable
+   *  group. Surfaced only as a tab tooltip. */
+  raster?: boolean;
   groups: FilterGroup[];
 }
 
@@ -129,6 +136,96 @@ export const FILTERS: FilterDef[] = [
         inputs: ['vo_edgeWidth', 'vo_edgeColor', 'vo_transparentBg'],
       },
       treatment(),
+    ],
+  },
+  {
+    effect: 'dither',
+    label: 'Dither',
+    groups: [
+      {
+        label: 'Dither',
+        inputs: ['di_algorithm', 'di_palette', 'di_colorCount', 'di_scale', 'di_fit'],
+      },
+      treatment(),
+    ],
+  },
+  {
+    effect: 'ascii',
+    label: 'ASCII',
+    groups: [
+      {
+        label: 'Characters',
+        inputs: ['as_ramp', 'as_cellSize', 'as_fontWeight', 'as_invert', 'as_fit'],
+      },
+      {
+        label: 'Colour',
+        inputs: ['as_colorMode', 'as_fgColor', 'as_bgColor'],
+      },
+      {
+        label: 'Tone',
+        collapsed: true,
+        inputs: ['as_threshold'],
+      },
+      treatment(),
+    ],
+  },
+  // ── raster effects ─────────────────────────────────────────────────────────
+  // These bake a bitmap; they place as an image rather than an editable group.
+  {
+    effect: 'duotone',
+    label: 'Duotone',
+    raster: true,
+    groups: [
+      {
+        label: 'Treatment',
+        inputs: ['du_treatment', 'du_treatmentAmount', 'du_treatShadow', 'du_treatMid', 'du_treatHighlight'],
+      },
+    ],
+  },
+  {
+    effect: 'pixel-stretch',
+    label: 'Pixel stretch',
+    raster: true,
+    groups: [
+      {
+        label: 'Stretch',
+        inputs: ['px_direction', 'px_threshold', 'px_spread', 'px_feather'],
+      },
+    ],
+  },
+  {
+    effect: 'imperfections',
+    label: 'Imperfections',
+    raster: true,
+    groups: [
+      {
+        label: 'Press',
+        inputs: ['im_preset', 'im_strength', 'im_seed', 'im_fit'],
+      },
+      {
+        label: 'Ink',
+        inputs: ['im_ink1', 'im_ink2', 'im_plates', 'im_misregAmount', 'im_bleedAmount'],
+      },
+      {
+        label: 'Paper',
+        collapsed: true,
+        inputs: ['im_degradeAmount', 'im_paperTint', 'im_paperTintStrength', 'im_grainAmount'],
+      },
+    ],
+  },
+  {
+    effect: 'glitch',
+    label: 'Glitch',
+    raster: true,
+    groups: [
+      {
+        label: 'Pixel sort',
+        inputs: ['gl_sortThreshold', 'gl_sortDirection', 'gl_sortBandLength'],
+      },
+      {
+        label: 'Blocks',
+        inputs: ['gl_blockAmount', 'gl_blockSize', 'gl_seed', 'gl_fit'],
+      },
     ],
   },
 ];
