@@ -133,12 +133,13 @@ body {
   padding: 0 12px;
 }
 
-/* "Show original" — a small pill over the top-right of the stage, so comparing
-   the trace against its source is one click without leaving the preview. */
-.compare {
+/* Two pills float over the stage corners: "Expand" (top-left) blows the preview
+   up to fill the panel, "Original" (top-right) swaps the trace for its source —
+   so both ways of judging the result before committing it are one click, without
+   leaving the preview. */
+.stage-pill {
   position: absolute;
   top: 8px;
-  right: 20px;
   padding: 3px 9px;
   border: 1px solid var(--line);
   border-radius: 999px;
@@ -150,16 +151,24 @@ body {
   opacity: 0.85;
 }
 
-.compare:hover {
+.stage-pill:hover {
   color: var(--fg);
   opacity: 1;
 }
 
-.compare.active {
+.stage-pill.active {
   border-color: var(--accent);
   background: var(--accent);
   color: var(--accent-fg);
   opacity: 1;
+}
+
+.expand {
+  left: 20px;
+}
+
+.compare {
+  right: 20px;
 }
 
 .stage {
@@ -190,6 +199,31 @@ body {
   max-width: 100%;
   max-height: 100%;
   height: auto;
+}
+
+/* ── maximised preview ──────────────────────────────────────────────────────
+   "Expand" trades the source picker and the controls for a stage that fills the
+   whole column — the largest view the panel can give before the trace is
+   committed. The tabs (switch effect) and the footer ("Add to canvas") stay put;
+   Esc or the pill restores the editing layout. */
+.preview-max .source,
+.preview-max .panel {
+  display: none;
+}
+
+.preview-max .preview {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  /* Trim the side gutters too, so the stage reclaims width as well as height —
+     a square trace grows, not just a portrait one. */
+  padding: 4px 6px 10px;
+}
+
+.preview-max .stage {
+  flex: 1;
+  aspect-ratio: auto;
+  min-height: 0;
 }
 
 .error {

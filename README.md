@@ -41,7 +41,9 @@ Three sources, all of them client-side:
 
 Over every source, a **Show original** toggle on the preview swaps the trace for
 the untouched source image (the tool's `noFilter` input) — a one-click A/B while
-you dial the effect in.
+you dial the effect in. An **Expand** toggle beside it folds the picker and the
+controls away and grows the stage to fill the panel, so you can judge the result
+at size before committing it; Esc or the pill brings the controls back.
 
 ## How it works
 

@@ -65,6 +65,11 @@ let hydrated = '';
  *  source image instead of the trace. A compare toggle, reset on every new
  *  source (a fresh runtime starts unfiltered). */
 let showOriginal = false;
+/** Preview maximised — the stage fills the panel with the source picker and the
+ *  controls folded away, so the trace can be judged full-size before it's
+ *  committed. A pure view preference: it survives source and effect changes and
+ *  never touches the runtime. */
+let previewMax = false;
 /** Generation counter so a slow mount that the user has already moved on from
  *  can't install itself over the newer one. */
 let mountSeq = 0;
@@ -88,7 +93,8 @@ app.innerHTML = `
   </section>
   <section class="preview">
     <div class="stage" aria-live="polite"></div>
-    <button type="button" class="compare" data-act="compare" aria-pressed="false" title="Show the source image, unfiltered" hidden>Original</button>
+    <button type="button" class="stage-pill expand" data-act="expand" aria-pressed="false" title="Expand the preview to fill the panel" hidden>Expand</button>
+    <button type="button" class="stage-pill compare" data-act="compare" aria-pressed="false" title="Show the source image, unfiltered" hidden>Original</button>
   </section>
   <p class="error" hidden></p>
   <section class="panel"></section>
@@ -105,6 +111,7 @@ const panel = app.querySelector('.panel') as HTMLElement;
 const errorEl = app.querySelector('.error') as HTMLParagraphElement;
 const placeBtn = app.querySelector('[data-act="place"]') as HTMLButtonElement;
 const compareBtn = app.querySelector('[data-act="compare"]') as HTMLButtonElement;
+const expandBtn = app.querySelector('[data-act="expand"]') as HTMLButtonElement;
 const fileInput = app.querySelector('input[type=file]') as HTMLInputElement;
 
 function showError(message: string | null): void {
@@ -280,13 +287,15 @@ function syncSourceButtons(): void {
   syncCompare();
 }
 
-/** The "Show original" toggle: only meaningful once there's a source, and its
- *  label/pressed state reflects which view the stage is currently showing. */
+/** The stage pills — "Show original" and "Expand" — are only meaningful once
+ *  there's a source, and the compare label/pressed state reflects which view the
+ *  stage is currently showing. */
 function syncCompare(): void {
   compareBtn.hidden = !source;
   compareBtn.classList.toggle('active', showOriginal);
   compareBtn.setAttribute('aria-pressed', String(showOriginal));
   compareBtn.textContent = showOriginal ? 'Filtered' : 'Original';
+  expandBtn.hidden = !source;
 }
 
 compareBtn.addEventListener('click', () => {
@@ -295,6 +304,29 @@ compareBtn.addEventListener('click', () => {
   // `noFilter` is a tool input the panel drives itself rather than exposing as a
   // control — flipping it swaps the trace for the raw source, live or still.
   setInput('noFilter', showOriginal);
+});
+
+/** Maximise or restore the preview. Toggling `.preview-max` on #app is the whole
+ *  mechanism — CSS grows the stage to fill the column and hides the picker and
+ *  controls; the runtime, the source and the current effect are all untouched,
+ *  so collapsing brings the controls straight back mid-edit. */
+function setPreviewMax(on: boolean): void {
+  previewMax = on;
+  app.classList.toggle('preview-max', on);
+  expandBtn.classList.toggle('active', on);
+  expandBtn.setAttribute('aria-pressed', String(on));
+  expandBtn.textContent = on ? 'Collapse' : 'Expand';
+  expandBtn.title = on
+    ? 'Shrink the preview and bring the controls back'
+    : 'Expand the preview to fill the panel';
+}
+
+expandBtn.addEventListener('click', () => setPreviewMax(!previewMax));
+
+// Esc restores the controls — they're hidden while the preview is maximised, so
+// this is the fast way back without hunting for the pill.
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && previewMax) setPreviewMax(false);
 });
 
 app.querySelector('.source-buttons')?.addEventListener('click', (e) => {
