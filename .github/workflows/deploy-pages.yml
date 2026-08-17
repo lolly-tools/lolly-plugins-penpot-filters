@@ -1,8 +1,8 @@
 # Build the plugin and publish dist/ to GitHub Pages.
 #
 # The bundle imports the Lolly engine from a SIBLING checkout, and copies the
-# four community/filter-* tool directories in verbatim (see vite.config.ts), so
-# the job clones the public lolly repo next to this one before building. GitHub
+# community/filter tool directory in verbatim (see vite.config.ts), so the job
+# clones the public lolly repo next to this one before building. GitHub
 # Pages serves with `Access-Control-Allow-Origin: *`, which is what Penpot's
 # plugin loader needs; users install from:
 #   https://lolly-tools.github.io/lolly-plugins-penpot-filters/manifest.json
@@ -33,17 +33,16 @@ jobs:
           path: lolly-plugins-penpot-filters
 
       # Sibling lolly checkout — SOURCE FILES ONLY. The bundle needs the engine
-      # .ts sources plus the four community/filter-* tool directories; the
-      # engine's two runtime deps (handlebars, ajv) are dependencies of THIS
-      # repo and aliased to its node_modules, so lolly is never npm-installed
-      # here.
+      # .ts sources plus the community/filter tool directory; the engine's two
+      # runtime deps (handlebars, ajv) are dependencies of THIS repo and aliased
+      # to its node_modules, so lolly is never npm-installed here.
       - uses: actions/checkout@v4
         with:
           repository: lolly-tools/lolly
           path: lolly
 
-      # community/ is a submodule (lolly-tools/lolly-tools) — the filters live
-      # there, so without this the build finds an empty directory. Only this one
+      # community/ is a submodule (lolly-tools/lolly-tools) — the filter tool
+      # lives there, so without this the build finds an empty directory. Only this one
       # is initialised: a recursive init would drag in every shell and service
       # subrepo and break on any parent-pointer drift.
       - name: Init community submodule
@@ -66,10 +65,10 @@ jobs:
         working-directory: lolly-plugins-penpot-filters
         run: LOLLY_DIR="$GITHUB_WORKSPACE/lolly" npm run build
 
-      # Mounts all four filters through the real loader + runtime against the
-      # just-built dist/tools/. Catches a tool renaming an input, or an engine
-      # bump the manifests' engineVersion range no longer satisfies — both of
-      # which would otherwise ship green and break in the panel.
+      # Mounts each of the four vector effects through the real loader + runtime
+      # against the just-built dist/tools/. Catches the tool renaming an input, or
+      # an engine bump the manifest's engineVersion range no longer satisfies —
+      # both of which would otherwise ship green and break in the panel.
       - name: Smoke test
         working-directory: lolly-plugins-penpot-filters
         run: LOLLY_DIR="$GITHUB_WORKSPACE/lolly" ./scripts/smoke.sh

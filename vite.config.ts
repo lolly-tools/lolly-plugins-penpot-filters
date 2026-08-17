@@ -10,13 +10,14 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 // defaults to the sibling directory.
 const LOLLY = process.env.LOLLY_DIR ? resolve(process.env.LOLLY_DIR) : resolve(HERE, '../lolly');
 
-/** The community tools this plugin exposes, loaded verbatim from the lolly tree. */
-export const TOOL_IDS = [
-  'filter-posterize',
-  'filter-halftone',
-  'filter-scanline',
-  'filter-voronoi',
-] as const;
+/**
+ * The community tool this plugin exposes, loaded verbatim from the lolly tree.
+ * Upstream consolidated the seven `filter-*` tools into one `filter` tool
+ * (community/filter), whose `effect` input selects halftone / scanline /
+ * posterize / voronoi (vector) or the raster effects. The panel drives the four
+ * vector effects; the tool is still copied unmodified.
+ */
+export const TOOL_IDS = ['filter'] as const;
 
 /** Files the engine's loader may ask for. styles.css is optional per tool. */
 const TOOL_FILES = ['tool.json', 'template.html', 'hooks.js', 'styles.css'];

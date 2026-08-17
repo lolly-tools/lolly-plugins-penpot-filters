@@ -17,8 +17,11 @@ result lands on the canvas as an editable Penpot group — not a placed bitmap.
 | **Scanline** | Horizontal "infinity lines": line weight tracks tone across a five-stop colour ramp. | a handful of long `<path>`s |
 | **Voronoi** | Shatters the image into a relaxed Voronoi mosaic, each cell flooded with its nearest source colour. | one `<polygon>` per cell |
 
-The duotone and pixel-stretch filters from the Lolly catalog are deliberately
-out of scope here.
+These are four of the seven effects in Lolly's single `filter` tool, selected
+through its `effect` input. The other three — duotone, pixel-stretch and
+imperfections — output a raster image rather than vector paths, so they're
+deliberately out of scope: this plugin commits editable vector to the canvas or
+nothing.
 
 ## Where the image comes from
 
@@ -30,8 +33,15 @@ Three sources, all of them client-side:
 - **Upload** — any local image file.
 - **Use camera** — the panel drives the tool's own `onFrame` hook off a live
   `getUserMedia` stream, so the preview **is** the filter re-tracing ~30× a
-  second, not a video with an effect layered over it. "Add to canvas" freezes
-  the frame you're looking at and commits it as vector.
+  second, not a video with an effect layered over it. Stopping the camera (or
+  pressing "Add to canvas") **freezes** the frame you're looking at into a still,
+  so the controls keep working on it afterwards rather than going dead — the live
+  source carries no pixels of its own once the stream stops, so the freeze is
+  what keeps the panel editable. "Add to canvas" commits that frame as vector.
+
+Over every source, a **Show original** toggle on the preview swaps the trace for
+the untouched source image (the tool's `noFilter` input) — a one-click A/B while
+you dial the effect in.
 
 ## How it works
 
@@ -43,8 +53,10 @@ selection / themechange  ─────────────────▶ 
 shape.export({type:'png'}) ───────────────▶  PNG bytes
                                              │  (or an upload, or a camera frame)
                                              ▼
-                                    loadTool()  ← dist/tools/filter-*/
-                                    createRuntime(tool, host, initial)
+                                    loadTool()  ← dist/tools/filter/  (mounted once)
+                                    createRuntime(tool, host, {effect, image, …})
+                                             │
+                              tabs → runtime.setInput('effect', …)
                                              │
                               community hooks.js decode → trace → SVG
                                              │
@@ -53,32 +65,40 @@ shape.export({type:'png'}) ───────────────▶  PNG
 penpot.createShapeFromSvgWithImages()
 ```
 
-The four tools are the **unmodified** `community/filter-*` directories from the
-lolly repo — `tool.json`, `template.html` and `hooks.js` copied verbatim into
-`dist/tools/` at build time and fetched as text by the engine's own loader. A
-filter behaves identically here and on lolly.tools; nothing is forked.
+The tool is the **unmodified** `community/filter` directory from the lolly repo —
+`tool.json`, `template.html` and `hooks.js` copied verbatim into `dist/tools/` at
+build time and fetched as text by the engine's own loader. (Upstream consolidated
+the old seven `filter-*` tools into this one, with an `effect` input.) It's
+mounted once for the session; switching tabs just sets `effect` on the live
+runtime — the decoded source is reused and a running camera keeps running. An
+effect behaves identically here and on lolly.tools; nothing is forked.
 
-What this repo actually adds is `src/ui/host.ts`: a ~150-line `HostV1`
-capability bridge scoped to what these four tools reach for (`log`,
-`assets.get`, `profile.get`, `compose.renderUrl`, `media`), plus a camera
-implementation (`src/ui/media.ts`) and a small control renderer
-(`src/ui/controls.ts`) covering the six input types the filters use.
+What this repo actually adds is `src/ui/host.ts`: a `HostV1` capability bridge
+scoped to what these effects reach for (`log`, `assets.get`, `profile.get`,
+`compose.renderUrl`, `media`, and `raster.{canRaster,decode}` — the tool now
+decodes its source image through `host.raster` rather than a hand-rolled
+`<img>`, so without it every preview falls back to the tool's placeholder), plus
+a camera implementation (`src/ui/media.ts`) and a small control renderer
+(`src/ui/controls.ts`) covering the six input types the effects use.
 
 ### Curated controls
 
-Every filter also carries a block of lolly.tools brand-overlay inputs (logo
-watermark, lower-third name card, headshot) that make no sense dropped onto a
-Penpot board. Rather than patch the manifests, `src/ui/filters.ts` lists the
-input ids the panel renders; the rest keep their manifest defaults. The one
-value override is Voronoi's — its manifest ships an 80%-strength brand tint and
-the logo on, both tuned for a gallery card. The tint dial stays exposed at 0.
+The tool carries a lot the panel has no business showing: the three raster
+effects' inputs, and a block of lolly.tools brand-overlay inputs (logo
+watermark, lower-third name card, headshot) meant for social-video exports.
+Rather than patch the manifest, `src/ui/filters.ts` lists — per effect, by their
+namespaced ids (`ht_`, `sc_`, `pz_`, `vo_`, plus the shared colour-treatment
+block) — exactly the inputs the panel renders; everything else keeps its
+manifest default, which is "off" for every overlay. The consolidated tool ships
+neutral (no brand tint, logo off), so unlike the old per-tool build there's no
+value override to make here.
 
 ## Development
 
 Requires a sibling checkout of the lolly repo:
 
 ```
-~/Build/lolly                        ← engine sources + community/filter-*
+~/Build/lolly                        ← engine sources + community/filter
 ~/Build/lolly-plugins-penpot-filters ← this repo
 ```
 
@@ -108,11 +128,12 @@ drive.
 npm run smoke
 ```
 
-Loads all four filters through the real loader + runtime against the built
-`dist/tools/`, and asserts each one mounts, hydrates to an `<svg>`, declares an
-`onFrame` hook, and actually declares every input id `filters.ts` promises to
-render. It cannot cover the trace itself — that needs a real `<canvas>`, and
-each filter deliberately degrades to a placeholder card in a headless shell
+Loads the `filter` tool through the real loader + runtime against the built
+`dist/tools/`, and for each of the four vector effects asserts it mounts,
+hydrates to an `<svg>`, declares an `onFrame` hook, and that every input id
+`filters.ts` promises to render actually exists in the manifest. It cannot cover
+the trace itself — that needs a real `<canvas>`, and `host.raster` reports
+unavailable in the headless shell, so each effect degrades to a placeholder card
 rather than throwing. Runs in CI before publish.
 
 ## Deploying

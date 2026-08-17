@@ -19,7 +19,7 @@ import type { AssetRef } from '@lolly-tools/core/host-v1';
 import type { PluginToUi, UiToPlugin, ShapeInfo, Theme } from '../messages.ts';
 import { createHost, PENPOT_COLORS, type FilterHost } from './host.ts';
 import { describeFailure } from './media.ts';
-import { FILTERS, filterById, type FilterDef } from './filters.ts';
+import { FILTERS, filterByEffect, TOOL_ID, SOURCE_INPUT } from './filters.ts';
 import { renderControls } from './controls.ts';
 
 // ── plugin channel ────────────────────────────────────────────────────────────
@@ -55,18 +55,22 @@ interface Source {
 let theme: Theme = 'light';
 let selection: ShapeInfo[] = [];
 let source: Source | null = null;
-let activeFilterId = FILTERS[0].id;
+let activeEffect = FILTERS[0].effect;
 let runtime: Runtime | null = null;
 let unsubscribe: (() => void) | null = null;
 let live = false;
 let model: InputModelItem[] = [];
 let hydrated = '';
+/** "Show original" is on — the tool's `noFilter` bypass, so the stage shows the
+ *  source image instead of the trace. A compare toggle, reset on every new
+ *  source (a fresh runtime starts unfiltered). */
+let showOriginal = false;
 /** Generation counter so a slow mount that the user has already moved on from
  *  can't install itself over the newer one. */
 let mountSeq = 0;
 
 const openGroups = new Set<string>();
-const seededFilters = new Set<string>();
+const seededEffects = new Set<string>();
 const host: FilterHost = createHost(PENPOT_COLORS.light);
 
 // ── DOM ───────────────────────────────────────────────────────────────────────
@@ -84,6 +88,7 @@ app.innerHTML = `
   </section>
   <section class="preview">
     <div class="stage" aria-live="polite"></div>
+    <button type="button" class="compare" data-act="compare" aria-pressed="false" title="Show the source image, unfiltered" hidden>Original</button>
   </section>
   <p class="error" hidden></p>
   <section class="panel"></section>
@@ -99,6 +104,7 @@ const stage = app.querySelector('.stage') as HTMLElement;
 const panel = app.querySelector('.panel') as HTMLElement;
 const errorEl = app.querySelector('.error') as HTMLParagraphElement;
 const placeBtn = app.querySelector('[data-act="place"]') as HTMLButtonElement;
+const compareBtn = app.querySelector('[data-act="compare"]') as HTMLButtonElement;
 const fileInput = app.querySelector('input[type=file]') as HTMLInputElement;
 
 function showError(message: string | null): void {
@@ -195,7 +201,9 @@ fileInput.addEventListener('change', async () => {
 
 async function useCamera(): Promise<void> {
   if (live) {
-    await stopLive();
+    // "Stop camera" keeps the frame you're looking at: freeze it to a still so
+    // the controls go on working on it (see freezeLiveFrame).
+    await freezeLiveFrame();
     return;
   }
   if (!host.media.isAvailable()) {
@@ -238,6 +246,30 @@ async function stopLive(): Promise<void> {
   syncSourceButtons();
 }
 
+/**
+ * Turn the live camera frame currently on screen into an ordinary still the
+ * controls can keep working on.
+ *
+ * While live, the source ref carries no url — `onFrame` supplies the pixels — so
+ * the moment the camera stops, a slider nudge would re-trace against that empty
+ * ref and collapse the preview to the tool's "choose an image" placeholder.
+ * Grabbing the frame as a still (before the video is torn down), registering it
+ * as a normal image source, and re-feeding the runtime keeps the frozen frame
+ * fully editable — and armed for "Add to canvas". A no-op when not live.
+ */
+async function freezeLiveFrame(): Promise<void> {
+  if (!live) return;
+  const video = host.media.video;
+  const w = video?.videoWidth || 1080;
+  const h = video?.videoHeight || 1080;
+  const label = source?.label ?? 'Camera';
+  const still = host.media.grabStill(); // read the frame before stopLive drops the video
+  await stopLive();
+  if (!still) return; // couldn't grab it — leave the last trace on screen
+  source = { kind: 'camera', ref: toAsset(still, label, w, h), shapeId: null, label };
+  await runtime?.setInput(SOURCE_INPUT, source.ref);
+}
+
 function syncSourceButtons(): void {
   for (const btn of app.querySelectorAll<HTMLButtonElement>('[data-source]')) {
     const kind = btn.dataset.source as SourceKind;
@@ -245,7 +277,25 @@ function syncSourceButtons(): void {
     if (kind === 'camera') btn.textContent = live ? 'Stop camera' : 'Use camera';
     if (kind === 'board') btn.disabled = selection.length === 0;
   }
+  syncCompare();
 }
+
+/** The "Show original" toggle: only meaningful once there's a source, and its
+ *  label/pressed state reflects which view the stage is currently showing. */
+function syncCompare(): void {
+  compareBtn.hidden = !source;
+  compareBtn.classList.toggle('active', showOriginal);
+  compareBtn.setAttribute('aria-pressed', String(showOriginal));
+  compareBtn.textContent = showOriginal ? 'Filtered' : 'Original';
+}
+
+compareBtn.addEventListener('click', () => {
+  showOriginal = !showOriginal;
+  syncCompare();
+  // `noFilter` is a tool input the panel drives itself rather than exposing as a
+  // control — flipping it swaps the trace for the raw source, live or still.
+  setInput('noFilter', showOriginal);
+});
 
 app.querySelector('.source-buttons')?.addEventListener('click', (e) => {
   const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-source]');
@@ -261,20 +311,44 @@ app.querySelector('.source-buttons')?.addEventListener('click', (e) => {
 function renderTabs(): void {
   tabsEl.replaceChildren(
     ...FILTERS.map((f) => {
+      const active = f.effect === activeEffect;
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.role = 'tab';
+      btn.setAttribute('aria-selected', String(active));
       btn.textContent = f.label;
-      btn.className = f.id === activeFilterId ? 'active' : '';
-      btn.addEventListener('click', () => {
-        if (f.id === activeFilterId) return;
-        activeFilterId = f.id;
-        renderTabs();
-        void mount();
-      });
+      btn.className = active ? 'active' : '';
+      btn.addEventListener('click', () => void selectEffect(f.effect));
       return btn;
     }),
   );
+}
+
+/** Seed an effect's default-open groups the first time it's shown. openGroups is
+ *  shared across effects, so seeding only once for the whole panel would leave
+ *  every later effect's groups shut; after this the user's own toggles win. */
+function seedGroups(effect: string): void {
+  if (seededEffects.has(effect)) return;
+  seededEffects.add(effect);
+  for (const g of filterByEffect(effect).groups) if (!g.collapsed) openGroups.add(g.label);
+}
+
+/**
+ * Switch effect. One tool is mounted for the whole session, so a tab change is
+ * just `effect` flipped on the live runtime — no reload, the decoded source is
+ * reused (the hook caches it by URL), and a running camera keeps running (its
+ * `onFrame` reads the new effect off the model). The controls repaint when the
+ * model settles, so we don't paint here: the incoming effect's inputs are
+ * `showIf`-hidden until the model actually carries the new effect, and painting
+ * early would flash an empty panel.
+ */
+async function selectEffect(effect: string): Promise<void> {
+  if (effect === activeEffect) return;
+  activeEffect = effect;
+  seedGroups(effect);
+  renderTabs();
+  if (runtime) setInput('effect', effect);
+  else await mount();
 }
 
 /** Fetch one tool file as text. The tools sit in dist/tools/ next to the panel
@@ -287,26 +361,27 @@ async function fetchToolFile(path: string): Promise<string> {
 
 async function mount(): Promise<void> {
   const seq = ++mountSeq;
-  const wasLive = live;
-  await stopLive();
   unsubscribe?.();
   unsubscribe = null;
   runtime = null;
-  // Values still queued belong to the filter we're leaving; its input ids may
-  // not even exist on the next one.
+  // A newly-mounted runtime starts from a clean slate; a value queued against
+  // the torn-down one would land on the wrong runtime.
   queued.clear();
+  // A fresh runtime traces (noFilter defaults off), so the compare toggle resets
+  // with it — a new source starts filtered.
+  showOriginal = false;
 
-  const filter = filterById(activeFilterId);
+  const filter = filterByEffect(activeEffect);
   stage.classList.add('busy');
 
   try {
-    const tool = await loadTool(filter.id, fetchToolFile);
+    const tool = await loadTool(TOOL_ID, fetchToolFile);
     if (seq !== mountSeq) return;
 
-    // The source image goes in as initial state, so the very first hydration
-    // already carries the traced art — no empty-placeholder flash.
-    const initial: Record<string, InputValue> = { ...filter.defaults };
-    if (source && source.ref.url) initial[filter.source] = source.ref;
+    // The effect and the source image go in as initial state, so the very first
+    // hydration already carries the right traced art — no empty-placeholder flash.
+    const initial: Record<string, InputValue> = { effect: activeEffect };
+    if (source && source.ref.url) initial[SOURCE_INPUT] = source.ref;
     // Output size follows the source, so a 16:9 board doesn't come back square.
     const dims = sourceDimensions(tool.manifest.render);
     if (dims) Object.assign(initial, dims);
@@ -314,28 +389,17 @@ async function mount(): Promise<void> {
     const rt = await createRuntime(tool, host, initial);
     if (seq !== mountSeq) return;
     runtime = rt;
-
-    // Seed this filter's own default-open groups the first time it's mounted —
-    // openGroups is shared across filters (they share group labels), so seeding
-    // only once for the whole panel would leave every later filter shut.
-    // Once seeded, the user's own toggles are what's left.
-    if (!seededFilters.has(filter.id)) {
-      seededFilters.add(filter.id);
-      for (const g of filter.groups) if (!g.collapsed) openGroups.add(g.label);
-    }
+    seedGroups(activeEffect);
 
     unsubscribe = rt.subscribe((state) => {
       model = state.model;
       hydrated = state.hydrated;
-      paint(filter);
+      paint();
     });
     model = rt.getModel();
     hydrated = rt.getHydrated();
-    paint(filter);
+    paint();
     showError(null);
-
-    // Switching filters mid-camera keeps the camera running.
-    if (wasLive) await useCamera();
   } catch (e) {
     if (seq !== mountSeq) return;
     showError(`Couldn’t load ${filter.label}: ${String((e as Error)?.message ?? e)}`);
@@ -345,8 +409,8 @@ async function mount(): Promise<void> {
 }
 
 /** Match the render's aspect to the source image, keeping the manifest's own
- *  size as the long edge. Only applies to the two filters that expose
- *  width/height inputs (posterize, voronoi); the others letterbox via `fit`. */
+ *  size as the long edge. `width`/`height` are shared across every effect now, so
+ *  this applies to all four; `fit` still letterboxes within the frame. */
 function sourceDimensions(
   render: { width?: number; height?: number } | undefined,
 ): { width: number; height: number } | null {
@@ -374,12 +438,16 @@ panel.addEventListener('pointerdown', () => {
 window.addEventListener('pointerup', () => {
   if (!dragging) return;
   dragging = false;
-  if (rebuildPending) paint(filterById(activeFilterId));
+  if (rebuildPending) paint();
 });
 
-function paint(filter: FilterDef): void {
-  // The hydrated template IS an SVG document (each filter's template.html is a
-  // single `{{{...Svg}}}` interpolation), so it drops straight into the stage.
+function paint(): void {
+  const filter = filterByEffect(activeEffect);
+  // For a vector effect the hydrated template is `{{{svgContent}}}` — a complete
+  // `<svg>` — followed by the tool's export-chrome `<script>`s, which never run
+  // (scripts assigned via innerHTML don't execute) and whose web-shell selectors
+  // find nothing here anyway. Dropping it in and reading back the `<svg>` is all
+  // the panel needs.
   stage.innerHTML = hydrated;
 
   // Mid-drag, replacing the controls would destroy the very element the pointer
@@ -404,6 +472,7 @@ function paint(filter: FilterDef): void {
   }
 
   placeBtn.disabled = !hydrated.trim() || !source;
+  syncCompare();
 }
 
 /**
@@ -455,14 +524,15 @@ function currentSvg(): string | null {
 placeBtn.addEventListener('click', async () => {
   const svg = currentSvg();
   if (!svg) return;
-  const filter = filterById(activeFilterId);
+  const filter = filterByEffect(activeEffect);
+  // Freeze the frame the user is looking at BEFORE locking the button: the SVG is
+  // already captured, and freezing turns the live feed into a still so the panel
+  // stays editable after the commit (and stops the camera repainting mid-add). A
+  // no-op for a non-camera source.
+  await freezeLiveFrame();
   placeBtn.disabled = true;
   placeBtn.textContent = 'Adding…';
   try {
-    // Freeze the frame the user is looking at: stopping live first means the
-    // shape that lands matches the preview, not whatever the camera moved on to
-    // while Penpot was parsing.
-    await stopLive();
     const reply = await request((requestId) => ({
       type: 'place-svg',
       requestId,

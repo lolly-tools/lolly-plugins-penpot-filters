@@ -1,18 +1,31 @@
 // SPDX-License-Identifier: MPL-2.0
 /**
- * Which Lolly filters the panel exposes, and which of each tool's inputs it
- * shows.
+ * Which of the Lolly filter tool's effects the panel exposes, and which of each
+ * effect's inputs it shows.
  *
- * The tools are loaded verbatim — a filter must behave identically here and on
- * lolly.tools, so nothing is patched. But every filter also carries a block of
- * lolly.tools brand-overlay inputs (logo watermark, lower-third name card,
- * headshot) that exist for social-video exports and make no sense dropped onto
- * a Penpot board. Rather than edit the manifests, the panel renders only the
- * ids listed here; the rest keep their manifest defaults, which are all "off".
+ * Upstream consolidated the seven `filter-*` tools into one `filter` tool: a
+ * single `effect` select switches between halftone / scanline / posterize /
+ * voronoi (which emit vector SVG) and duotone / pixel-stretch / imperfections
+ * (which emit a raster image). This plugin's whole promise is an editable vector
+ * group on the Penpot canvas, so it drives only the four vector effects and
+ * leaves the raster three alone.
  *
- * `source` names each tool's image input — they disagree (`photo` vs `image`),
- * and the panel has to know which one to feed.
+ * The tool is loaded verbatim — an effect must behave identically here and on
+ * lolly.tools, so nothing is patched. Its inputs are namespaced per effect
+ * (`ht_`, `sc_`, `pz_`, `vo_`), with a shared colour-treatment block and a block
+ * of brand-overlay inputs (logo watermark, lower-third name card, headshot) that
+ * exist for social-video exports and make no sense on a Penpot board. Rather
+ * than edit the manifest, the panel renders only the ids listed here; the rest
+ * keep their manifest defaults, which are all "off".
  */
+
+/** The one tool this plugin mounts. Its `effect` input picks the look. */
+export const TOOL_ID = 'filter';
+
+/** The manifest input that takes the source image. Unified across every effect
+ *  now (the old tools disagreed — `photo` vs `image`), so the panel always feeds
+ *  this one. */
+export const SOURCE_INPUT = 'image';
 
 export interface FilterGroup {
   label: string;
@@ -23,125 +36,111 @@ export interface FilterGroup {
 }
 
 export interface FilterDef {
-  id: string;
-  /** Short label for the tab strip — the manifest name is "Filter: Halftone". */
+  /** The `effect` value this tab drives. */
+  effect: string;
+  /** Short label for the tab strip — the manifest option label is the same. */
   label: string;
-  /** The manifest input that takes the source image. */
-  source: string;
   groups: FilterGroup[];
-  /** Manifest defaults the panel overrides on mount. Reserved for defaults that
-   *  are right on lolly.tools and wrong here — see filter-voronoi. */
-  defaults?: Record<string, string | number | boolean>;
 }
 
 /**
- * The HSL/blend colour treatment block every filter carries — same ids, same
- * semantics, same order. Voronoi is the one exception: it has no `brightness`
- * (its cells take their colour from the source pixel directly, so there is no
- * pre-trace luminance stage to lift), hence the parameter rather than a shared
- * constant.
+ * The colour-treatment block every effect carries. Hue/saturation/lightness and
+ * the treatment tint are shared, unprefixed inputs; `contrast` is shared too.
+ * Brightness is the one per-effect member (`ht_brightness`, …) — voronoi has
+ * none (its cells take their colour from the source pixel directly, so there's
+ * no pre-trace luminance stage to lift), hence the optional id.
  */
-function treatment({ brightness = true } = {}): FilterGroup {
+function treatment(brightnessId?: string): FilterGroup {
   return {
     label: 'Colour treatment',
     collapsed: true,
     inputs: [
-      ...(brightness ? ['brightness'] : []),
+      ...(brightnessId ? [brightnessId] : []),
       'contrast', 'hue', 'saturation', 'lightness',
       'treatmentColor', 'blendMode', 'treatmentIntensity',
     ],
   };
 }
 
-/** Tab order, and — via the first entry — the filter the panel opens on.
+/** Tab order, and — via the first entry — the effect the panel opens on.
  *  Halftone leads: it's the fastest to trace, the most forgiving of a low-
  *  contrast source, and the one whose output reads instantly as "this worked". */
 export const FILTERS: FilterDef[] = [
   {
-    id: 'filter-halftone',
+    effect: 'halftone',
     label: 'Halftone',
-    source: 'image',
     groups: [
       {
         label: 'Dots',
-        inputs: ['gridSize', 'dotScale', 'shape', 'invert', 'fit'],
+        inputs: ['ht_gridSize', 'ht_dotScale', 'ht_shape', 'ht_invert', 'ht_fit'],
       },
       {
         label: 'Colour',
-        inputs: ['colorSource', 'colorLevels', 'fgColor', 'bgColor'],
+        inputs: ['ht_colorSource', 'ht_colorLevels', 'ht_fgColor', 'ht_bgColor'],
       },
       {
         label: 'Tone',
         collapsed: true,
-        inputs: ['gamma', 'smoothing', 'dither'],
+        inputs: ['ht_gamma', 'ht_smoothing', 'ht_dither'],
       },
-      treatment(),
+      treatment('ht_brightness'),
     ],
   },
   {
-    id: 'filter-posterize',
+    effect: 'posterize',
     label: 'Posterize',
-    source: 'photo',
     groups: [
       {
         label: 'Separations',
-        inputs: ['steps', 'threshold', 'thresholdLevel', 'invert', 'resample', 'colors'],
+        inputs: ['pz_steps', 'pz_threshold', 'pz_thresholdLevel', 'pz_invert', 'pz_resample', 'pz_colors'],
       },
       {
         label: 'Trace',
-        inputs: ['quality', 'smoothing', 'transparentBg'],
+        inputs: ['pz_quality', 'pz_smoothing', 'pz_transparentBg'],
       },
-      treatment(),
+      treatment('pz_brightness'),
     ],
   },
   {
-    id: 'filter-scanline',
+    effect: 'scanline',
     label: 'Scanline',
-    source: 'image',
     groups: [
       {
         label: 'Lines',
-        inputs: ['lineSize', 'gapSize', 'separatePixels', 'everyLine', 'fit'],
+        inputs: ['sc_lineSize', 'sc_gapSize', 'sc_separatePixels', 'sc_everyLine', 'sc_fit'],
       },
       {
         label: 'Ramp',
-        inputs: ['highlight', 'light', 'mid', 'shade', 'shadow', 'background'],
+        inputs: ['sc_highlight', 'sc_light', 'sc_mid', 'sc_shade', 'sc_shadow', 'sc_background'],
+      },
+      treatment('sc_brightness'),
+    ],
+  },
+  {
+    effect: 'voronoi',
+    label: 'Voronoi',
+    groups: [
+      {
+        label: 'Cells',
+        inputs: ['vo_cells', 'vo_jitter', 'vo_relax', 'vo_seed'],
+      },
+      {
+        label: 'Edges',
+        inputs: ['vo_edgeWidth', 'vo_edgeColor', 'vo_transparentBg'],
       },
       treatment(),
     ],
   },
-  {
-    id: 'filter-voronoi',
-    label: 'Voronoi',
-    source: 'image',
-    groups: [
-      {
-        label: 'Cells',
-        inputs: ['cells', 'jitter', 'relax', 'seed'],
-      },
-      {
-        label: 'Edges',
-        inputs: ['edgeWidth', 'edgeColor', 'transparentBg'],
-      },
-      treatment({ brightness: false }),
-    ],
-    // Voronoi is the one filter whose manifest defaults are tuned for a Lolly
-    // gallery card rather than a neutral start: an 80%-strength brand tint over
-    // every cell, and the logo watermark switched on. Both are wrong for art the
-    // user is about to drop into their own document — the cells should come out
-    // the colour of the photo. The tint controls stay exposed at 0 so it's a dial
-    // away, not removed.
-    defaults: { treatmentColor: '', treatmentIntensity: 0, showLogo: false },
-  },
 ];
 
-/** Ids the panel drives itself rather than exposing as a control: the source
- *  image, the output size (taken from the Penpot shape), and `noFilter` (wired
- *  to the camera pane's own bypass toggle). */
-export const PANEL_OWNED = new Set(['width', 'height', 'noFilter']);
+/** Ids the panel drives itself rather than exposing as a control: the effect
+ *  selector (the tab strip), the source image, the output size (taken from the
+ *  Penpot shape), the live-camera resolution, and `noFilter` (the raw-image
+ *  bypass, meaningful only in the tool's own live pane). */
+export const PANEL_OWNED = new Set(['effect', 'image', 'width', 'height', 'liveRes', 'noFilter']);
 
-export function filterById(id: string): FilterDef {
-  const f = FILTERS.find((x) => x.id === id);
-  if (!f) throw new Error(`Unknown filter "${id}"`);
+export function filterByEffect(effect: string): FilterDef {
+  const f = FILTERS.find((x) => x.effect === effect);
+  if (!f) throw new Error(`Unknown effect "${effect}"`);
   return f;
 }
