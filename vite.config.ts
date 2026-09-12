@@ -82,6 +82,11 @@ export default defineConfig({
       // imports would resolve against lolly's node_modules — which CI doesn't
       // install. Pin both to THIS repo's node_modules instead.
       'ajv/dist/2020.js': resolve(HERE, 'node_modules/ajv/dist/2020.js'),
+      // @lolly-tools/core's file-operation-v1.ts imports ajv's package entry
+      // rather than the 2020 build the engine uses. Keep this key AFTER the
+      // deep one above: alias matching runs in order, and a bare 'ajv' also
+      // matches 'ajv/dist/2020.js'.
+      ajv: resolve(HERE, 'node_modules/ajv/dist/ajv.js'),
       handlebars: resolve(HERE, 'node_modules/handlebars/dist/cjs/handlebars.js'),
     },
   },
