@@ -83,7 +83,7 @@ export const FILTERS: FilterDef[] = [
       },
       {
         label: 'Colour',
-        inputs: ['ht_colorSource', 'ht_colorLevels', 'ht_fgColor', 'ht_bgColor'],
+        inputs: ['ht_colorSource', 'ht_colorLevels', 'ht_fgColor', 'ht_bgColor', 'ht_transparentBg'],
       },
       {
         label: 'Tone',
@@ -103,7 +103,7 @@ export const FILTERS: FilterDef[] = [
       },
       {
         label: 'Trace',
-        inputs: ['pz_quality', 'pz_smoothing', 'pz_transparentBg'],
+        inputs: ['pz_quality', 'pz_smoothing', 'pz_transparentBg', 'pz_bgColor'],
       },
       treatment('pz_brightness'),
     ],
@@ -133,7 +133,7 @@ export const FILTERS: FilterDef[] = [
       },
       {
         label: 'Edges',
-        inputs: ['vo_edgeWidth', 'vo_edgeColor', 'vo_transparentBg'],
+        inputs: ['vo_edgeWidth', 'vo_edgeColor', 'vo_transparentBg', 'vo_bgColor'],
       },
       treatment(),
     ],
@@ -144,7 +144,7 @@ export const FILTERS: FilterDef[] = [
     groups: [
       {
         label: 'Dither',
-        inputs: ['di_algorithm', 'di_palette', 'di_colorCount', 'di_scale', 'di_fit'],
+        inputs: ['di_algorithm', 'di_diffusion', 'di_serpentine', 'di_strength', 'di_pixelShape', 'di_palette', 'di_colorCount', 'di_scale', 'di_fit'],
       },
       treatment(),
     ],
@@ -180,6 +180,7 @@ export const FILTERS: FilterDef[] = [
         label: 'Treatment',
         inputs: ['du_treatment', 'du_treatmentAmount', 'du_treatShadow', 'du_treatMid', 'du_treatHighlight'],
       },
+      { label: 'Tone', inputs: ['contrast'] },
     ],
   },
   {
@@ -191,6 +192,7 @@ export const FILTERS: FilterDef[] = [
         label: 'Stretch',
         inputs: ['px_direction', 'px_threshold', 'px_spread', 'px_feather'],
       },
+      { label: 'Tone', inputs: ['contrast'] },
     ],
   },
   {
@@ -211,6 +213,7 @@ export const FILTERS: FilterDef[] = [
         collapsed: true,
         inputs: ['im_degradeAmount', 'im_paperTint', 'im_paperTintStrength', 'im_grainAmount'],
       },
+      { label: 'Tone', inputs: ['contrast'] },
     ],
   },
   {
@@ -226,6 +229,7 @@ export const FILTERS: FilterDef[] = [
         label: 'Blocks',
         inputs: ['gl_blockAmount', 'gl_blockSize', 'gl_seed', 'gl_fit'],
       },
+      { label: 'Tone', inputs: ['contrast'] },
     ],
   },
 ];

@@ -1,7 +1,7 @@
 {
   "version": 2,
   "name": "Lolly Filters",
-  "description": "Turn any image on your board into clean vector art: posterized colour separations, halftone dots, scanlines or Voronoi cells. Preview live — from the selection, an upload, or your camera — then drop the SVG straight onto the canvas. Runs entirely in your browser, nothing is uploaded anywhere.",
+  "description": "Apply ten image effects, including halftone, posterize, scanline, Voronoi, dither, ASCII, duotone, pixel stretch, misprint and glitch. Preview a selection or upload, then place editable vectors or an image on the canvas. Runs entirely in your browser, nothing is uploaded anywhere.",
   "code": "plugin.js",
   "icon": "icon.png",
   "permissions": [
