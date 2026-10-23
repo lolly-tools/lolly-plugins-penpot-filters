@@ -186,3 +186,14 @@ One-time repo setting: **Settings → Pages → Source: GitHub Actions.**
 ## License
 
 MPL-2.0, same as the Lolly engine.
+
+## Compatibility checks
+
+Builds use the sibling Lolly checkout. `dist/build-info.json` records the exact
+plugin and Lolly commits, engine version, bundled tool versions and whether
+source edits were present. Use that record when comparing an installed plugin
+with the current engine.
+
+Pull requests and the weekly scheduled workflow build and check compatibility
+against Lolly main without publishing. Pushes to plugin main and manual workflow
+runs publish only after those checks pass. Dependencies come from `npm ci`.

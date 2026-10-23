@@ -20,7 +20,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import { createHost, PENPOT_COLORS } from '../src/ui/host.ts';
-import { FILTERS, TOOL_ID, SOURCE_INPUT } from '../src/ui/filters.ts';
+import { FILTERS, TOOL_ID, SOURCE_INPUT, PANEL_OWNED } from '../src/ui/filters.ts';
 
 // From the runner, not import.meta.url — the bundle lands in node_modules/.cache,
 // nowhere near dist/.
@@ -44,6 +44,16 @@ for (const filter of FILTERS) {
       ...filter.groups.flatMap((g) => g.inputs),
     ].filter((id) => !declared.has(id));
     if (missing.length) throw new Error(`unknown input ids: ${missing.join(', ')}`);
+
+    // Check the other direction too: newly added effect controls must be
+    // reachable. Framing and channel vectors still need a vector control.
+    const shown = new Set([...PANEL_OWNED, ...filter.groups.flatMap(g => g.inputs)]);
+    const stranded = (tool.manifest.inputs ?? []).filter(input => {
+      const effects = input.showIf?.effect;
+      const applies = Array.isArray(effects) ? effects.includes(filter.effect) : effects === filter.effect;
+      return applies && input.type !== 'vector' && !shown.has(input.id);
+    }).map(input => input.id);
+    if (stranded.length) throw new Error(`effect controls missing from panel: ${stranded.join(', ')}`);
 
     const host = createHost(PENPOT_COLORS.light);
     const runtime = await createRuntime(tool, host, { effect: filter.effect });
