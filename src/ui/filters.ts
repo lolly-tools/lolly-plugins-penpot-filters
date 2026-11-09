@@ -118,7 +118,7 @@ export const FILTERS: FilterDef[] = [
       },
       {
         label: 'Ramp',
-        inputs: ['sc_highlight', 'sc_light', 'sc_mid', 'sc_shade', 'sc_shadow', 'sc_background'],
+        inputs: ['sc_colorSource', 'sc_highlight', 'sc_light', 'sc_mid', 'sc_shade', 'sc_shadow', 'sc_background'],
       },
       treatment('sc_brightness'),
     ],
